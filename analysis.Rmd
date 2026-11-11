@@ -1,0 +1,469 @@
+---
+title: "Analysis of Auckland Summer Temperature"
+author: "Bhuwan Aneja"
+date: "2026-08-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(rpart)
+library(rpart.plot)
+library(ranger)
+library(viridis)
+```
+
+# Introduction
+
+This report aims to explore the relationship between land cover attributes and summer air temperatures in Auckland. The data include summer temperature data, and other environmental variables like vegetation cover, building cover, paved surface cover, etc., at the national scale.
+
+The importance of the variables used in predicting mean and maximum temperature are explored with regression trees and random forest models. The analysis additionally estimates the urban heat island effect and looks at the association between tree canopy cover and maximum temperature in urban areas.
+
+# Data Preparation
+
+```{r}
+temperature_data <- read_csv(
+  "Average_Daily_Air_Temperature_C_-6573379643131210635.csv"
+)
+
+dim(temperature_data)
+
+names(temperature_data)
+
+head(temperature_data)
+
+summary(temperature_data)
+
+apply(
+  temperature_data,
+  2,
+  function(x) sum(is.na(x))
+)
+
+temperature_data_clean <- temperature_data |>
+  select(
+    -OBJECTID,
+    -VALIDATIONSTATE,
+    -created_user,
+    -created_date,
+    -last_edited_user,
+    -last_edited_date,
+    -Shape__Area,
+    -Shape__Length
+  )
+
+dim(temperature_data_clean)
+```
+
+The dataset contains 104,181 records representing grid locations across Auckland. Each observation includes temperature measurements and information about landcover characteristics.
+
+Initial checks were performed to confirm the structure of the dataset and identify any missing values. Several metadata variables contained only missing values and were removed before modelling.
+
+
+# Question 1
+
+```{r}
+
+# Creating coordinates from Grid ID
+temperature_map <- temperature_data_clean |>
+  separate(
+    `Grid ID`,
+    into = c("east_letter", "north"),
+    sep = "-"
+  ) |>
+  mutate(
+    east = (match(substr(east_letter, 1, 1), LETTERS) - 1) * 26 +
+      match(substr(east_letter, 2, 2), LETTERS),
+    north = as.numeric(north)
+  )
+
+
+# Checking that coordinates were created correctly
+head(
+  temperature_map |>
+    select(east_letter, east, north)
+)
+
+# Plotting mean temperature map
+
+ggplot(
+  temperature_map,
+  aes(
+    x = east,
+    y = north,
+    fill = `Mean air temperature at 2m`
+  )
+) +
+  geom_tile() +
+  scale_fill_viridis_c() +
+  coord_equal() +
+  labs(
+    title = "Mean summer temperature across Auckland",
+    subtitle = "Summer temperature distribution across grid locations",
+    x = "East-West position",
+    y = "North-South position",
+    fill = "Mean temperature (°C)"
+  ) +
+  theme_minimal()
+
+# Checking temperature range
+
+range(
+  temperature_map$`Mean air temperature at 2m`
+)
+
+# Summary statistics
+
+summary(
+  temperature_map$`Mean air temperature at 2m`
+)
+```
+
+
+The map shows that mean summer temperature varies across Auckland, with some regions being warmer than others. The temperature values range from approximately 16.1°C to 19.8°C, with an average temperature of around 18.4°C. The spatial variation suggests that local environmental characteristics influence temperature patterns. Factors such as altitude, vegetation, water coverage and urban development may contribute to differences in temperature between locations.
+
+
+# Question 2
+A regression tree was fitted to predict mean summer temperature using landcover variables. The model uses environmental characteristics such as altitude, vegetation, buildings, water coverage and population density as predictors.
+
+```{r}
+# Selecting variables for regression tree
+
+mean_temperature_data <- temperature_data_clean |>
+  select(
+    `Mean air temperature at 2m`,
+    Altitude,
+    `Canopy Height`,
+    `Building Height`,
+    Irrigated,
+    `Fraction of Trees`,
+    `Fraction of Grass`,
+    `Fraction of Paved Surfaces`,
+    `Fraction of Buildings`,
+    `Fraction of Bare Soil`,
+    `Fraction of Water`,
+    `Fraction of Albedo Buildings`,
+    `Fraction Albedo Paved`,
+    `Population Density`
+  )
+
+# Fitting regression tree
+
+mean_temperature_tree <- rpart(
+  `Mean air temperature at 2m` ~ .,
+  data = mean_temperature_data,
+  method = "anova"
+)
+# Displaying tree output
+
+mean_temperature_tree
+# Plotting regression tree
+
+rpart.plot(
+  mean_temperature_tree,
+  main = "Regression tree predicting mean temperature"
+)
+
+# Complexity parameter table
+printcp(mean_temperature_tree)
+```
+
+The regression tree showed that the most important predictor of mean temperature was the altitude, which was chosen as the first splitting variable in the regression tree. The predicted temperatures were lower at higher altitude sites, reflecting the expected decrease in temperatures with elevation. Fraction of buildings, fraction of trees, fraction of water and population density were some other important variables selected by the tree. The variables indicate that there are factors other than the urban development influencing the variation in mean temperature across Auckland; these are natural features.
+
+The overall mean temperature was the worst predictor in terms of minimizing the prediction error, indicating that landcover variables can be useful for explaining temperature differences between locations.
+
+
+# Question 3
+
+A regression tree was fitted to predict maximum summer temperature using the same landcover variables. Maximum temperature represents the hottest conditions experienced across Auckland, so variables related to vegetation, altitude and urban development may have a stronger influence.
+
+```{r}
+
+# Selecting variables for regression tree
+maximum_temperature_data <- temperature_data_clean |>
+  select(
+    `Maximum air temperature at 2m`,
+    Altitude,
+    `Canopy Height`,
+    `Building Height`,
+    Irrigated,
+    `Fraction of Trees`,
+    `Fraction of Grass`,
+    `Fraction of Paved Surfaces`,
+    `Fraction of Buildings`,
+    `Fraction of Bare Soil`,
+    `Fraction of Water`,
+    `Fraction of Albedo Buildings`,
+    `Fraction Albedo Paved`,
+    `Population Density`
+  )
+# Fitting regression tree
+maximum_temperature_tree <- rpart(
+  `Maximum air temperature at 2m` ~ .,
+  data = maximum_temperature_data,
+  method = "anova"
+)
+# Displaying tree output
+
+maximum_temperature_tree
+
+# Plotting regression tree
+
+rpart.plot(
+  maximum_temperature_tree,
+  main = "Regression tree predicting maximum temperature"
+)
+# Complexity parameter table
+
+printcp(maximum_temperature_tree)
+```
+
+Fraction of grass was the first and most important split variable in the regression tree for maximum temperature. This indicates that the amount of vegetation cover is a significant factor in the variation in Auckland's maximum temperatures. Altitude and fraction of water and population density were also shown to be important predictors for the tree.
+
+Predicted maximum temperatures were lower at higher altitudes and higher in areas of higher population density. The same applied to water coverage as a cooling effect. The overall tree indicates the influence of both natural and urban attributes on maximum temperature.
+
+# Question 4
+
+A random forest model was fitted to predict mean summer temperature using the same landcover variables used in the regression tree. Random forests combine many regression trees, which can improve prediction accuracy by reducing the variability of a single tree.
+
+```{r}
+# Preparing data for ranger by simplifying variable names
+
+mean_temperature_rf_data <- mean_temperature_data |>
+  rename_with(
+    ~ make.names(.)
+  )
+# Splitting data into training and testing sets
+
+set.seed(369)
+
+train_index <- sample(
+  1:nrow(mean_temperature_rf_data),
+  0.8 * nrow(mean_temperature_rf_data)
+)
+
+mean_train <- mean_temperature_rf_data[train_index, ]
+
+mean_test <- mean_temperature_rf_data[-train_index, ]
+
+# Fitting random forest model
+
+mean_rf <- ranger(
+  Mean.air.temperature.at.2m ~ .,
+  data = mean_train,
+  importance = "permutation"
+)
+
+
+# Displaying model information
+mean_rf
+
+# Predicting on test data
+
+mean_predictions <- predict(
+  mean_rf,
+  mean_test
+)$predictions
+
+
+# Calculating test MSE
+
+mean_rf_mse <- mean(
+  (mean_test$Mean.air.temperature.at.2m -
+     mean_predictions)^2
+)
+mean_rf_mse
+
+# Variable importance
+sort(
+  mean_rf$variable.importance,
+  decreasing = TRUE
+)
+```
+
+The out of bag prediction error of the random forest model was about 0.051 and the test MSE was about 0.052, using 500 trees. This is a significant improvement over the single regression tree, which was achieving a higher prediction error.
+
+The variable importance results indicated that mean temperature was the most important variable, given by altitude. The following variables were also considered important: fraction of trees, population density, fraction of grass and fraction of water. These results are similar to the regression tree, in which altitude was also chosen as the initial split.
+
+This is because in the random forest, predictions are made by multiple trees, resulting in lower variance for the forest, and improved predictions for unseen data.
+
+# Question 5
+A random forest model was fitted to predict maximum summer temperature using landcover variables. The model performance is compared with the regression tree from Question 3 to evaluate whether combining multiple trees improves prediction accuracy.
+
+```{r}
+
+# Preparing data for ranger by simplifying variable names
+
+maximum_temperature_rf_data <- maximum_temperature_data |>
+  rename_with(
+    ~ make.names(.)
+  )
+# Splitting data into training and testing sets
+
+set.seed(369)
+train_index_max <- sample(
+  1:nrow(maximum_temperature_rf_data),
+  0.8 * nrow(maximum_temperature_rf_data)
+)
+
+max_train <- maximum_temperature_rf_data[train_index_max, ]
+
+max_test <- maximum_temperature_rf_data[-train_index_max, ]
+
+# Fitting random forest model
+
+max_rf <- ranger(
+  Maximum.air.temperature.at.2m ~ .,
+  data = max_train,
+  importance = "permutation"
+)
+# Displaying model information
+max_rf
+
+# Predicting on test data
+
+max_predictions <- predict(
+  max_rf,
+  max_test
+)$predictions
+
+
+# Calculating test MSE
+
+max_rf_mse <- mean(
+  (max_test$Maximum.air.temperature.at.2m -
+     max_predictions)^2
+)
+
+max_rf_mse
+
+
+# Variable importance
+
+sort(
+  max_rf$variable.importance,
+  decreasing = TRUE
+)
+```
+
+Out of bag prediction error of the random forest model was about 0.154 and the test MSE was about 0.155 for predicting the maximum temperature. This was significantly less than the regression tree found in Question 3 indicating that the random forest was more successful at predicting.
+
+The variable importance result indicated that the highest variable importance is to the maximum temperature followed by fraction of grass, population density and fraction of trees. The results correspond with the regression tree which chose fraction of grass as the first split variable.
+
+This is because the random forest is better generalising to the unseen data due to the averaging of many trees, which lessens the variance of individual trees.
+
+# Question 6
+
+The urban heat island effect describes the difference in temperature between urban and nonurban areas. A simple comparison may be misleading because locations can differ in altitude, vegetation, water coverage and building density. Therefore, a regression model was used to estimate the urban effect while controlling for other environmental characteristics.
+
+```{r}
+
+# Creating urban and nonurban categories using population density
+
+temperature_uhi <- temperature_data_clean |>
+  mutate(
+    urban = if_else(
+      `Population Density` >
+        median(`Population Density`),
+      "Urban",
+      "Non-urban"
+    )
+  )
+# Checking number of observations in each group
+
+table(temperature_uhi$urban)
+# Comparing mean temperature between groups
+
+temperature_uhi |>
+  group_by(urban) |>
+  summarise(
+    mean_temperature =
+      mean(`Mean air temperature at 2m`),
+    median_temperature =
+      median(`Mean air temperature at 2m`),
+    number_of_locations = n()
+  )
+
+# Fitting regression model controlling for other factors
+
+uhi_model <- lm(
+  `Mean air temperature at 2m` ~
+    urban +
+    Altitude +
+    `Fraction of Trees` +
+    `Fraction of Water` +
+    `Fraction of Buildings`,
+  data = temperature_uhi
+)
+# Model results
+summary(uhi_model)
+```
+
+The urban heat island effect was estimated by comparing urban and non-urban sites, after accounting for other factors which affect temperature such as altitude, trees, water, and buildings. The mean temperature was slightly higher in urban areas than in nonurban areas, as revealed by a simple comparison. With other factors accounted for, the urban effect was calculated to be around -0.07°C. This indicates that urbanization density is not a good indicator of urbanization in every situation and other landcover properties are more influential on the difference in temperature.
+
+The model indicated that the building coverage was related to higher temperatures, and altitude and water coverage to lower temperatures. This shows that variations in temperature across Auckland are due to both urban and natural features.
+
+One drawback of this analysis is that population density was the only criterion used to outline urban areas. While population density is a good indicator of urbanisation, it is not a complete indicator of all aspects of urban life, including building density, road coverage or land use. More likely, a more detailed classification of urban areas might result in another estimate of the urban heat island effect.
+
+# Question 7
+
+To estimate the effect of tree cover, the analysis was restricted to urban Auckland locations. This provides a more appropriate comparison because tree covered and nontree covered areas may differ in other characteristics such as altitude, buildings, paved surfaces and water coverage. A regression model was used to estimate the relationship between tree cover and maximum temperature while controlling for these factors.
+
+```{r}
+
+# Selecting only urban locations
+urban_temperature <- temperature_uhi |>
+  filter(
+    urban == "Urban"
+  )
+
+# Checking number of urban observations
+dim(urban_temperature)
+
+# Fitting regression model
+tree_effect_model <- lm(
+  `Maximum air temperature at 2m` ~
+    `Fraction of Trees` +
+    Altitude +
+    `Fraction of Buildings` +
+    `Fraction of Paved Surfaces` +
+    `Fraction of Water` +
+    `Population Density`,
+  data = urban_temperature
+)
+# Model results
+summary(tree_effect_model)
+```
+
+Tree cover was estimated only at urban locations, and was adjusted for other environmental factors when determining the effect on maximum temperature. The coefficient for fraction of trees was negative (-0.491), which means that locations where there is more tree cover have lower maximum temperatures when other factors are controlled for. A 0.1 change in fraction of tree cover corresponds to about 0.05°C change in maximum temperature, due to the range of the fraction of trees (0-1).
+
+Other factors also had an influence on maximum temperature. The altitude and water coverage indicated cooling effects with a slight warming effect for the population density. Around 46.5% of the variation in the maximum temperature over urban areas was explained by the model.
+
+The overall results indicate a link between higher tree cover and lower maximum temperature in urban Auckland, with other land cover features also being significant.
+
+
+# Conclusion
+
+This analysis explored the relationship between environmental and urban factors with summer temperature trends throughout Auckland. The temperature map indicated that there was spatial variation, which means that the temperature varies according to the different land characteristics.
+
+Important predictors of both mean and maximum temperature were identified by regression trees. Fraction of grass was an important predictor of maximum temperature with altitude being a significant predictor of mean temperature. The results indicate that there is interplay between natural and urban features and the temperature pattern.
+
+The random forest models predicted much better than individual regression trees. The random forest models had prediction errors lower than the single tree models since the noise and error of each tree were averaged out with the combination of many trees.
+
+It was found from the analysis of the urban heat island that the temperature difference between urban and nonurban areas is not only a function of population. Building coverage, vegetation, water coverage and altitude are important modifiers of temperature as well. The tree cover analysis indicated urban vegetation greenness was negatively correlated to maximum temperatures in urban Auckland, indicating there is potential for the urban vegetation to play a role in reducing heat exposure.
+
+The overall results indicate that there is interaction between land cover, natural features and urban development that affects Auckland's summer temperature patterns.
+
+# Citations and Acknowledgements
+
+The statistical methods used in this report, including regression trees, random forests, model comparison and variable importance, were based on concepts covered in the STATS 369 lecture notes and course materials.
+
+R packages used in this analysis include:
+
+- `tidyverse` for data manipulation and visualisation.
+- `rpart` and `rpart.plot` for regression tree modelling and visualisation.
+- `ranger` for random forest modelling.
+- `viridis` for colour scales in visualisations.
+
+In addition, I used ChatGPT to help improve the layout and readability of the R code, identify formatting and syntax issues, and organise some of the written explanations. I ran all code myself in RStudio, checked the outputs and graphs, and based the final interpretations on the results produced by my analysis.
